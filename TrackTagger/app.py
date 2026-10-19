@@ -335,7 +335,8 @@ class TrackTagger(tk.Tk):
             win.destroy()
         footer = ttk.Frame(win, padding=(16, 0, 16, 14))
         footer.pack(fill="x")
-        ttk.Label(footer, text=f"{len(results)} matches • Double-click a row or select it and confirm", style="Muted.TLabel").pack(side="left")
+        ttk.Label(footer, text=f"{len(results)} matches • Best match is ranked first", style="Muted.TLabel").pack(side="left")
+        ttk.Button(footer, text="Auto-select best match", command=lambda: (tree.selection_set("0"), choose()) if results else None).pack(side="right", padx=(8, 0))
         ttk.Button(footer, text="Use selected match", style="Accent.TButton", command=choose).pack(side="right")
         tree.bind("<Double-1>", lambda _event: choose())
         if results:
