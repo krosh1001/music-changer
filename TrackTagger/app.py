@@ -1,4 +1,5 @@
 import io
+import unicodedata
 import os
 import re
 import shutil
@@ -30,8 +31,50 @@ def clean_query(value):
     return re.sub(r"\s+", " ", value or "").strip()
 
 
+def split_artist_title(value):
+    value = clean_query(value)
+    parts = re.split(r"\s+[-–—]\s+", value, maxsplit=1)
+    if len(parts) == 2 and all(parts):
+        return parts[0].strip(), parts[1].strip()
+    return "", value
+
+
+def normalized(value):
+    value = unicodedata.normalize("NFKD", value or "").casefold()
+    value = "".join(ch for ch in value if not unicodedata.combining(ch))
+    return re.sub(r"[^a-z0-9а-яё]+", " ", value).strip()
+
+
+def levenshtein_similarity(a, b):
+    a, b = normalized(a), normalized(b)
+    if not a and not b:
+        return 1.0
+    if not a or not b:
+        return 0.0
+    if len(a) > len(b):
+        a, b = b, a
+    previous = list(range(len(a) + 1))
+    for j, cb in enumerate(b, 1):
+        current = [j]
+        for i, ca in enumerate(a, 1):
+            current.append(min(current[-1] + 1, previous[i] + 1, previous[i - 1] + (ca != cb)))
+        previous = current
+    return 1.0 - previous[-1] / max(len(a), len(b))
+
+
+def rank_matches(results, target_title="", target_artist="", target_album=""):
+    def score(item):
+        title = levenshtein_similarity(target_title, item.get("title", "")) if target_title else 0.0
+        artist = levenshtein_similarity(target_artist, item.get("artist", "")) if target_artist else 0.0
+        album = levenshtein_similarity(target_album, item.get("album", "")) if target_album else 0.0
+        weights = (0.68 if target_title else 0.0, 0.27 if target_artist else 0.0, 0.05 if target_album else 0.0)
+        total = sum(weights) or 1.0
+        return (title * weights[0] + artist * weights[1] + album * weights[2]) / total
+    return sorted(results, key=score, reverse=True)
+
+
 def search_musicbrainz(query):
-    params = urllib.parse.urlencode({"query": query, "fmt": "xml", "limit": 8})
+    params = urllib.parse.urlencode({"query": query, "fmt": "xml", "limit": 8, "inc": "genres"})
     data, _ = http_get(MUSICBRAINZ + "?" + params)
     root = ET.fromstring(data)
     ns = {"m": "http://musicbrainz.org/ns/mmd-2.0#"}
@@ -42,6 +85,8 @@ def search_musicbrainz(query):
         album = ""
         year = ""
         release_id = ""
+        genre_nodes = rec.findall("m:genre-list/m:genre/m:name", ns)
+        genre = ", ".join([node.text for node in genre_nodes if node.text][:3])
         artist_credit = rec.find("m:artist-credit", ns)
         if artist_credit is not None:
             names = []
@@ -55,7 +100,7 @@ def search_musicbrainz(query):
             album = release.findtext("m:title", default="", namespaces=ns)
             date = release.findtext("m:date", default="", namespaces=ns)
             year = date[:4] if date else ""
-        results.append({"title": title, "artist": artist, "album": album, "year": year, "release_id": release_id})
+        results.append({"title": title, "artist": artist, "album": album, "year": year, "genre": genre, "release_id": release_id})
     return results
 
 
@@ -217,22 +262,33 @@ class TrackTagger(tk.Tk):
             messagebox.showinfo(APP_NAME, "Select an MP3 file first.")
             return
         self._read_fields(track)
-        query = clean_query(f'recording:"{track.get("title") or track["path"].stem}" AND artist:"{track.get("artist", "")}"')
+        raw_title = track.get("title") or track["path"].stem
+        filename_artist, filename_title = split_artist_title(track["path"].stem)
+        tagged_artist = track.get("artist", "").strip()
+        title_artist, title_without_artist = split_artist_title(raw_title)
+        target_artist = tagged_artist or filename_artist or title_artist
+        if not tagged_artist and title_artist:
+            target_title = title_without_artist
+        elif not tagged_artist and filename_artist:
+            target_title = filename_title
+        else:
+            target_title = raw_title
+        query = clean_query(f'recording:"{target_title}" AND artist:"{target_artist}"') if target_artist else clean_query(f'recording:"{target_title}"')
         self.status.set("Searching MusicBrainz…")
-        threading.Thread(target=self._search_worker, args=(track, query), daemon=True).start()
+        threading.Thread(target=self._search_worker, args=(track, query, target_title, target_artist), daemon=True).start()
 
-    def _search_worker(self, track, query):
+    def _search_worker(self, track, query, target_title, target_artist):
         try:
             results = search_musicbrainz(query)
             if not results:
-                fallback = track.get("title") or track["path"].stem
-                results = search_musicbrainz(fallback)
-            self.after(0, lambda: self._show_results(track, results))
+                results = search_musicbrainz(target_title or track["path"].stem)
+            results = rank_matches(results, target_title, target_artist, track.get("album", ""))
+            self.after(0, lambda: self._show_results(track, results, target_title, target_artist))
         except Exception as exc:
             self.after(0, lambda err=exc: self.status.set(f"Search failed: {err}"))
             self.after(0, lambda err=exc: messagebox.showerror(APP_NAME, f"MusicBrainz search failed.\n{err}\n\nCheck your internet connection and try again."))
 
-    def _show_results(self, track, results):
+    def _show_results(self, track, results, target_title="", target_artist=""):
         if not results:
             self.status.set("No matches found")
             messagebox.showinfo(APP_NAME, "No MusicBrainz matches found. You can still edit tags manually.")
@@ -268,8 +324,10 @@ class TrackTagger(tk.Tk):
                 return
             track["match"] = results[int(sel[0])]
             result = track["match"]
-            for key in ("artist", "title", "album", "year"):
-                track[key] = result.get(key, "")
+            if not track.get("artist", "").strip():
+                track["artist"] = result.get("artist", "")
+            for key in ("title", "album", "year", "genre"):
+                track[key] = result.get(key, "") or track.get(key, "")
             self._update_row(track)
             if self.selected_track() is track:
                 self.on_select()
@@ -277,7 +335,8 @@ class TrackTagger(tk.Tk):
             win.destroy()
         footer = ttk.Frame(win, padding=(16, 0, 16, 14))
         footer.pack(fill="x")
-        ttk.Label(footer, text=f"{len(results)} matches • Double-click a row or select it and confirm", style="Muted.TLabel").pack(side="left")
+        ttk.Label(footer, text=f"{len(results)} matches • Best match is ranked first", style="Muted.TLabel").pack(side="left")
+        ttk.Button(footer, text="Auto-select best match", command=lambda: (tree.selection_set("0"), choose()) if results else None).pack(side="right", padx=(8, 0))
         ttk.Button(footer, text="Use selected match", style="Accent.TButton", command=choose).pack(side="right")
         tree.bind("<Double-1>", lambda _event: choose())
         if results:
