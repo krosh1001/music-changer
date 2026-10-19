@@ -113,6 +113,7 @@ class TrackTagger(tk.Tk):
         self.configure(bg="#111827")
         self.tracks = []
         self.current_folder = None
+        self.batch_running = False
         self._style()
         self._build_ui()
 
@@ -192,6 +193,8 @@ class TrackTagger(tk.Tk):
         ttk.Button(actions, text="⌕  Search MusicBrainz", style="Accent.TButton", command=self.search_selected).pack(fill="x", pady=(0, 8))
         ttk.Button(actions, text="Apply match", command=self.apply_match).pack(fill="x", pady=(0, 8))
         ttk.Button(actions, text="Save tags + cover", command=self.save_selected).pack(fill="x", pady=(0, 8))
+        self.auto_button = ttk.Button(actions, text="Auto-process all", style="Accent.TButton", command=self.auto_process_all)
+        self.auto_button.pack(fill="x", pady=(0, 8))
         ttk.Button(actions, text="Save all edited", command=self.save_all).pack(fill="x")
         self.status = tk.StringVar(value="Ready • Select a folder to begin")
         ttk.Label(root, textvariable=self.status, style="Muted.TLabel").pack(anchor="w", pady=(12, 0))
@@ -407,6 +410,109 @@ class TrackTagger(tk.Tk):
             tags.delall("APIC")
             tags.add(APIC(encoding=3, mime="image/jpeg", type=3, desc="Cover", data=cover))
         tags.save(path, v2_version=3)
+
+    def auto_process_all(self):
+        """Find the best MusicBrainz match, refresh cover art, and save every scanned MP3."""
+        if not self.tracks:
+            messagebox.showinfo(APP_NAME, "Choose a folder and scan MP3 files first.")
+            return
+        if self.batch_running:
+            return
+        count = len(self.tracks)
+        if not messagebox.askyesno(
+            APP_NAME,
+            f"Automatically process all {count} MP3 files?\n\n"
+            "The app will search MusicBrainz, choose the highest-scoring match, "
+            "fill title/album/year/genre, preserve any existing artist tag, "
+            "refresh cover art when available, and create a backup before saving.\n\n"
+            "Please review the results afterward; automatic matches can be imperfect."
+        ):
+            return
+        self.batch_running = True
+        self.auto_button.configure(state="disabled")
+        self.status.set("Starting automatic batch processing…")
+        threading.Thread(target=self._auto_process_worker, daemon=True).start()
+
+    def _auto_process_worker(self):
+        saved = 0
+        skipped = 0
+        errors = []
+        total = len(self.tracks)
+        last_request = 0.0
+
+        def paced_search(query):
+            nonlocal last_request
+            wait = 1.1 - (time.monotonic() - last_request)
+            if last_request and wait > 0:
+                time.sleep(wait)
+            result = search_musicbrainz(query)
+            last_request = time.monotonic()
+            return result
+
+        for index, track in enumerate(self.tracks, start=1):
+            self.after(0, lambda i=index, name=track["path"].name:
+                       self.status.set(f"Auto-processing {i}/{total}: {name}"))
+            try:
+                raw_title = track.get("title", "").strip() or track["path"].stem
+                filename_artist, filename_title = split_artist_title(track["path"].stem)
+                tagged_artist = track.get("artist", "").strip()
+                title_artist, title_without_artist = split_artist_title(raw_title)
+                target_artist = tagged_artist or filename_artist or title_artist
+                if not tagged_artist and title_artist:
+                    target_title = title_without_artist
+                elif not tagged_artist and filename_artist:
+                    target_title = filename_title
+                else:
+                    target_title = raw_title
+
+                if not target_title.strip():
+                    skipped += 1
+                    continue
+
+                query = (clean_query(f'recording:"{target_title}" AND artist:"{target_artist}"')
+                         if target_artist else clean_query(f'recording:"{target_title}"'))
+                results = paced_search(query)
+                if not results:
+                    results = paced_search(target_title or track["path"].stem)
+                results = rank_matches(results, target_title, target_artist, track.get("album", ""))
+                if not results:
+                    skipped += 1
+                    self.after(0, lambda t=track: self._set_track_status(t, "No match"))
+                    continue
+
+                best = results[0]
+                track["match"] = best
+                if not track.get("artist", "").strip():
+                    track["artist"] = best.get("artist", "")
+                for key in ("title", "album", "year", "genre"):
+                    track[key] = best.get(key, "") or track.get(key, "")
+
+                self._save_track(track)
+                saved += 1
+                self.after(0, lambda t=track: self._update_row(t))
+                self.after(0, lambda t=track: self._set_track_status(t, "Auto-processed"))
+            except Exception as exc:
+                errors.append(f'{track["path"].name}: {exc}')
+                self.after(0, lambda t=track: self._set_track_status(t, "Error"))
+
+        def finish():
+            self.batch_running = False
+            self.auto_button.configure(state="normal")
+            self.status.set(f"Auto-processing finished • saved {saved}, no match {skipped}, errors {len(errors)}")
+            summary = f"Automatic processing finished.\n\nSaved: {saved}\nNo match: {skipped}\nErrors: {len(errors)}"
+            if errors:
+                summary += "\n\nFirst errors:\n" + "\n".join(errors[:8])
+                messagebox.showwarning(APP_NAME, summary)
+            else:
+                messagebox.showinfo(APP_NAME, summary)
+        self.after(0, finish)
+
+    def _set_track_status(self, track, status):
+        idx = self.tracks.index(track)
+        values = list(self.table.item(str(idx), "values"))
+        if values:
+            values[-1] = status
+            self.table.item(str(idx), values=values)
 
     def save_all(self):
         if not self.tracks:
