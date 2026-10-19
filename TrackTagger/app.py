@@ -262,22 +262,33 @@ class TrackTagger(tk.Tk):
             messagebox.showinfo(APP_NAME, "Select an MP3 file first.")
             return
         self._read_fields(track)
-        query = clean_query(f'recording:"{track.get("title") or track["path"].stem}" AND artist:"{track.get("artist", "")}"')
+        raw_title = track.get("title") or track["path"].stem
+        filename_artist, filename_title = split_artist_title(track["path"].stem)
+        tagged_artist = track.get("artist", "").strip()
+        title_artist, title_without_artist = split_artist_title(raw_title)
+        target_artist = tagged_artist or filename_artist or title_artist
+        if not tagged_artist and title_artist:
+            target_title = title_without_artist
+        elif not tagged_artist and filename_artist:
+            target_title = filename_title
+        else:
+            target_title = raw_title
+        query = clean_query(f'recording:"{target_title}" AND artist:"{target_artist}"') if target_artist else clean_query(f'recording:"{target_title}"')
         self.status.set("Searching MusicBrainz…")
-        threading.Thread(target=self._search_worker, args=(track, query), daemon=True).start()
+        threading.Thread(target=self._search_worker, args=(track, query, target_title, target_artist), daemon=True).start()
 
-    def _search_worker(self, track, query):
+    def _search_worker(self, track, query, target_title, target_artist):
         try:
             results = search_musicbrainz(query)
             if not results:
-                fallback = track.get("title") or track["path"].stem
-                results = search_musicbrainz(fallback)
-            self.after(0, lambda: self._show_results(track, results))
+                results = search_musicbrainz(target_title or track["path"].stem)
+            results = rank_matches(results, target_title, target_artist, track.get("album", ""))
+            self.after(0, lambda: self._show_results(track, results, target_title, target_artist))
         except Exception as exc:
             self.after(0, lambda err=exc: self.status.set(f"Search failed: {err}"))
             self.after(0, lambda err=exc: messagebox.showerror(APP_NAME, f"MusicBrainz search failed.\n{err}\n\nCheck your internet connection and try again."))
 
-    def _show_results(self, track, results):
+    def _show_results(self, track, results, target_title="", target_artist=""):
         if not results:
             self.status.set("No matches found")
             messagebox.showinfo(APP_NAME, "No MusicBrainz matches found. You can still edit tags manually.")
