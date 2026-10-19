@@ -7,6 +7,7 @@ Windows GUI for reviewing and editing MP3 ID3 tags, searching MusicBrainz, and e
 - Edit artist, title, album, year, track number, and genre.
 - Search MusicBrainz using the tagged artist, or infer artist/title from a filename or title like `Artist - Title`.
 - Rank results by normalized Levenshtein similarity (title 68%, artist 27%, album 5%) and use **Auto-select best match** for one-click selection.
+- Use **Auto-process all** to search, rank, apply metadata, refresh available cover art, and save every scanned MP3 in sequence. It creates backups first, skips files with no match, shows progress, and reports errors at the end.
 - Preserve an existing artist tag when applying a match; fill it from MusicBrainz only when the artist tag is blank.
 - Read genre values from MusicBrainz when available and apply them to the genre tag.
 - Refresh embedded front-cover art from Cover Art Archive when saving a selected release; existing artwork remains if a replacement cannot be downloaded.
