@@ -33,7 +33,7 @@ def clean_query(value):
 
 def split_artist_title(value):
     value = clean_query(value)
-    parts = re.split(r"\\s+[-–—]\\s+", value, maxsplit=1)
+    parts = re.split(r"\s+[-–—]\s+", value, maxsplit=1)
     if len(parts) == 2 and all(parts):
         return parts[0].strip(), parts[1].strip()
     return "", value
