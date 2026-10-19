@@ -225,12 +225,12 @@ class TrackTagger(tk.Tk):
         try:
             results = search_musicbrainz(query)
             if not results:
-                fallback = urllib.parse.quote(track.get("title") or track["path"].stem)
+                fallback = track.get("title") or track["path"].stem
                 results = search_musicbrainz(fallback)
             self.after(0, lambda: self._show_results(track, results))
         except Exception as exc:
-            self.after(0, lambda: self.status.set(f"Search failed: {exc}"))
-            self.after(0, lambda: messagebox.showerror(APP_NAME, f"MusicBrainz search failed.\n{exc}\n\nCheck your internet connection and try again."))
+            self.after(0, lambda err=exc: self.status.set(f"Search failed: {err}"))
+            self.after(0, lambda err=exc: messagebox.showerror(APP_NAME, f"MusicBrainz search failed.\n{err}\n\nCheck your internet connection and try again."))
 
     def _show_results(self, track, results):
         if not results:
