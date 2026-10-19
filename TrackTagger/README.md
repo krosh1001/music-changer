@@ -5,8 +5,11 @@ Windows GUI for reviewing and editing MP3 ID3 tags, searching MusicBrainz, and e
 ## Features
 - Scan a folder and subfolders for MP3 files.
 - Edit artist, title, album, year, track number, and genre.
-- Search MusicBrainz and choose a recording/release match.
-- Download front cover art from Cover Art Archive when saving a selected release.
+- Search MusicBrainz using the tagged artist, or infer artist/title from a filename or title like `Artist - Title`.
+- Rank results by normalized Levenshtein similarity (title 68%, artist 27%, album 5%) and use **Auto-select best match** for one-click selection.
+- Preserve an existing artist tag when applying a match; fill it from MusicBrainz only when the artist tag is blank.
+- Read genre values from MusicBrainz when available and apply them to the genre tag.
+- Refresh embedded front-cover art from Cover Art Archive when saving a selected release; existing artwork remains if a replacement cannot be downloaded.
 - Create timestamped backups before writing tags in `_TrackTagger_Backup`.
 - Dark desktop interface; English labels.
 
