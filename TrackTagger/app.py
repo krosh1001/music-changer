@@ -1,4 +1,5 @@
 import io
+import unicodedata
 import os
 import re
 import shutil
@@ -28,6 +29,48 @@ def http_get(url, timeout=15):
 
 def clean_query(value):
     return re.sub(r"\s+", " ", value or "").strip()
+
+
+def split_artist_title(value):
+    value = clean_query(value)
+    parts = re.split(r"\\s+[-–—]\\s+", value, maxsplit=1)
+    if len(parts) == 2 and all(parts):
+        return parts[0].strip(), parts[1].strip()
+    return "", value
+
+
+def normalized(value):
+    value = unicodedata.normalize("NFKD", value or "").casefold()
+    value = "".join(ch for ch in value if not unicodedata.combining(ch))
+    return re.sub(r"[^a-z0-9а-яё]+", " ", value).strip()
+
+
+def levenshtein_similarity(a, b):
+    a, b = normalized(a), normalized(b)
+    if not a and not b:
+        return 1.0
+    if not a or not b:
+        return 0.0
+    if len(a) > len(b):
+        a, b = b, a
+    previous = list(range(len(a) + 1))
+    for j, cb in enumerate(b, 1):
+        current = [j]
+        for i, ca in enumerate(a, 1):
+            current.append(min(current[-1] + 1, previous[i] + 1, previous[i - 1] + (ca != cb)))
+        previous = current
+    return 1.0 - previous[-1] / max(len(a), len(b))
+
+
+def rank_matches(results, target_title="", target_artist="", target_album=""):
+    def score(item):
+        title = levenshtein_similarity(target_title, item.get("title", "")) if target_title else 0.0
+        artist = levenshtein_similarity(target_artist, item.get("artist", "")) if target_artist else 0.0
+        album = levenshtein_similarity(target_album, item.get("album", "")) if target_album else 0.0
+        weights = (0.68 if target_title else 0.0, 0.27 if target_artist else 0.0, 0.05 if target_album else 0.0)
+        total = sum(weights) or 1.0
+        return (title * weights[0] + artist * weights[1] + album * weights[2]) / total
+    return sorted(results, key=score, reverse=True)
 
 
 def search_musicbrainz(query):
