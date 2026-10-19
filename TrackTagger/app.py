@@ -270,8 +270,10 @@ class TrackTagger(tk.Tk):
                 return
             track["match"] = results[int(sel[0])]
             result = track["match"]
-            for key in ("artist", "title", "album", "year"):
-                track[key] = result.get(key, "")
+            if not track.get("artist", "").strip():
+                track["artist"] = result.get("artist", "")
+            for key in ("title", "album", "year", "genre"):
+                track[key] = result.get(key, "") or track.get(key, "")
             self._update_row(track)
             if self.selected_track() is track:
                 self.on_select()
