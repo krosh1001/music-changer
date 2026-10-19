@@ -42,6 +42,8 @@ def search_musicbrainz(query):
         album = ""
         year = ""
         release_id = ""
+        genre_nodes = rec.findall("m:genre-list/m:genre/m:name", ns)
+        genre = ", ".join([node.text for node in genre_nodes if node.text][:3])
         artist_credit = rec.find("m:artist-credit", ns)
         if artist_credit is not None:
             names = []
@@ -55,7 +57,7 @@ def search_musicbrainz(query):
             album = release.findtext("m:title", default="", namespaces=ns)
             date = release.findtext("m:date", default="", namespaces=ns)
             year = date[:4] if date else ""
-        results.append({"title": title, "artist": artist, "album": album, "year": year, "release_id": release_id})
+        results.append({"title": title, "artist": artist, "album": album, "year": year, "genre": genre, "release_id": release_id})
     return results
 
 
