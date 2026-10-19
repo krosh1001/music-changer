@@ -239,16 +239,27 @@ class TrackTagger(tk.Tk):
             return
         win = tk.Toplevel(self)
         win.title("Choose MusicBrainz match")
-        win.geometry("760x360")
+        # Roomy, resizable picker keeps the action button visible without manual resizing.
+        win.geometry("1100x620")
+        win.minsize(900, 480)
+        win.resizable(True, True)
         win.configure(bg="#111827")
+        win.transient(self)
         ttk.Label(win, text="Select the correct recording / release", style="Title.TLabel").pack(anchor="w", padx=16, pady=14)
         frame = ttk.Frame(win, padding=10)
         frame.pack(fill="both", expand=True)
+        frame.rowconfigure(0, weight=1)
+        frame.columnconfigure(0, weight=1)
         tree = ttk.Treeview(frame, columns=("artist", "title", "album", "year"), show="headings", selectmode="browse")
-        for col, width in [("artist", 160), ("title", 200), ("album", 240), ("year", 70)]:
+        for col, width in [("artist", 220), ("title", 270), ("album", 360), ("year", 90)]:
             tree.heading(col, text=col.upper())
-            tree.column(col, width=width)
-        tree.pack(fill="both", expand=True)
+            tree.column(col, width=width, minwidth=90, stretch=True)
+        yscroll = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
+        xscroll = ttk.Scrollbar(frame, orient="horizontal", command=tree.xview)
+        tree.configure(yscrollcommand=yscroll.set, xscrollcommand=xscroll.set)
+        tree.grid(row=0, column=0, sticky="nsew")
+        yscroll.grid(row=0, column=1, sticky="ns")
+        xscroll.grid(row=1, column=0, sticky="ew")
         for i, result in enumerate(results):
             tree.insert("", "end", iid=str(i), values=(result["artist"], result["title"], result["album"], result["year"]))
         def choose():
@@ -264,9 +275,19 @@ class TrackTagger(tk.Tk):
                 self.on_select()
             self.status.set("Match selected — review tags, then save")
             win.destroy()
-        ttk.Button(win, text="Use selected match", style="Accent.TButton", command=choose).pack(anchor="e", padx=16, pady=12)
+        footer = ttk.Frame(win, padding=(16, 0, 16, 14))
+        footer.pack(fill="x")
+        ttk.Label(footer, text=f"{len(results)} matches • Double-click a row or select it and confirm", style="Muted.TLabel").pack(side="left")
+        ttk.Button(footer, text="Use selected match", style="Accent.TButton", command=choose).pack(side="right")
+        tree.bind("<Double-1>", lambda _event: choose())
         if results:
             tree.selection_set("0")
+            tree.focus("0")
+        # Center the dialog on screen at its initial size.
+        win.update_idletasks()
+        x = max(0, (win.winfo_screenwidth() - win.winfo_width()) // 2)
+        y = max(0, (win.winfo_screenheight() - win.winfo_height()) // 2)
+        win.geometry("+" + str(x) + "+" + str(y))
 
     def apply_match(self):
         track = self.selected_track()
