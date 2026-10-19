@@ -31,7 +31,7 @@ def clean_query(value):
 
 
 def search_musicbrainz(query):
-    params = urllib.parse.urlencode({"query": query, "fmt": "xml", "limit": 8})
+    params = urllib.parse.urlencode({"query": query, "fmt": "xml", "limit": 8, "inc": "genres"})
     data, _ = http_get(MUSICBRAINZ + "?" + params)
     root = ET.fromstring(data)
     ns = {"m": "http://musicbrainz.org/ns/mmd-2.0#"}
